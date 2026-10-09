@@ -22,6 +22,7 @@
 #include "common/io_file.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
+#include "core/bloodborne_re.h"
 #include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
 #include "core/emulator_state.h"
@@ -183,6 +184,8 @@ std::filesystem::path GetInputConfigFile(const std::string& game_id) {
             {"hotkey_volume_down", "kpminus"},
             {"hotkey_emulator_settings", "f3"},
             {"hotkey_toggle_friends", "f2"},
+            {"hotkey_bb_beckoning_bell", "pgup"},
+            {"hotkey_bb_resonant_bell", "pgdown"},
         };
         std::string legacy_capture_binding;
         bool legacy_capture_binding_found = false;
@@ -808,6 +811,16 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
             break;
         case HOTKEY_TOGGLE_FRIENDS:
             PushSDLEvent(SDL_EVENT_TOGGLE_FRIENDS);
+            break;
+        case HOTKEY_BB_BECKONING_BELL:
+            if (new_button_state) {
+                Core::Bloodborne::RequestBellUse(200);
+            }
+            break;
+        case HOTKEY_BB_RESONANT_BELL:
+            if (new_button_state) {
+                Core::Bloodborne::RequestBellUse(205);
+            }
             break;
         case KEY_TOGGLE:
             // noop

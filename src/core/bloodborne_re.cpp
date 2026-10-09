@@ -186,6 +186,7 @@ constexpr u64 SummonedMapReloadOffset = 0x01336B90;
 constexpr u64 StageTransitionOffset = 0x013CDE30;
 constexpr u64 SetSummonReloadStateOffset = 0x0178D9A0;
 constexpr u64 UseItemNativeApplyOffset = 0x018F9720;
+constexpr s32 BeckoningBellGoodsId = 200;
 constexpr s32 SmallResonantBellGoodsId = 205;
 constexpr s32 SmallResonantBellEffectId = 9005;
 constexpr s32 BellUseArgument = 17;
@@ -783,6 +784,7 @@ std::mutex seamless_placement_mutex;
 std::optional<SummonPlacementDescriptor> seamless_host_placement;
 std::optional<SummonPlacementDescriptor> seamless_received_host_placement;
 bool seamless_received_host_placement_consumed{};
+std::atomic<s32> requested_bell_goods{};
 std::atomic<u32> pending_summon_reload_map{};
 std::atomic<u32> pending_summon_reload_state_map{};
 
@@ -1604,6 +1606,31 @@ void ResumePreMatchCrossMapResponder() {
              "Bloodborne seamless responder native bell dispatch map={:#x} area={} attempt={} "
              "result={}",
              record.target_map, record.target_area, record.attempts, record.native_result);
+}
+
+void ApplyRequestedBellUse() {
+    const s32 goods_id = requested_bell_goods.exchange(0);
+    if (goods_id == 0) {
+        return;
+    }
+
+    const u64 state = GetGlobalState();
+    if (state < 0x10000 || !HasMemoryAccess(state, 0x1521, MemoryProt::CpuRead) ||
+        ReadValue<u8>(state, 0x08) != 0 || ReadValue<u8>(state, 0x1520) != 0) {
+        LOG_INFO(Debug, "Bloodborne bell hotkey ignored for goods {}: stage transition", goods_id);
+        return;
+    }
+    const u64 player = GetLocalPlayer();
+    if (player < 0x10000 || !HasMemoryAccess(player, sizeof(u64), MemoryProt::CpuRead)) {
+        LOG_INFO(Debug, "Bloodborne bell hotkey ignored for goods {}: no player", goods_id);
+        return;
+    }
+
+    using UseItemNativeApply = bool PS4_SYSV_ABI (*)(u64 player, s32 goods_id, s32 argument);
+    const auto use_item =
+        reinterpret_cast<UseItemNativeApply>(image_base + UseItemNativeApplyOffset);
+    const bool result = use_item(player, goods_id, BellUseArgument);
+    LOG_INFO(Debug, "Bloodborne bell hotkey dispatched goods {} result={}", goods_id, result);
 }
 
 void ApplyHealingFountainHostAvailability(const GuestRegisterSnapshot& registers) {
@@ -2820,6 +2847,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         ApplyPreMatchCrossMapGuestWarp();
         ApplyDeferredSummonReload();
         ResumePreMatchCrossMapResponder();
+        ApplyRequestedBellUse();
     }
     if (healing_fountain_host_availability_hook_installed &&
         site.offset == HealingFountainAvailabilityOffset) {
@@ -3505,6 +3533,18 @@ void TraceMatching2LeaveRoom(std::uintptr_t return_address, std::uint64_t room_i
              "Bloodborne RE Matching2 leave room={} caller={:#x} offset={:#x} reload_phase={} "
              "current_map={:#x} requested_map={:#x}",
              room_id, return_address, caller_offset, reload_phase, current_map, requested_map);
+}
+
+void RequestBellUse(std::int32_t goods_id) {
+    if (!deferred_summon_reload_hook_installed) {
+        LOG_INFO(Debug, "Bloodborne bell hotkey ignored for goods {}: seamless co-op is off",
+                 goods_id);
+        return;
+    }
+    if (goods_id == BeckoningBellGoodsId || goods_id == SmallResonantBellGoodsId) {
+        LOG_INFO(Debug, "Bloodborne bell hotkey requested goods {}", goods_id);
+        requested_bell_goods.store(goods_id);
+    }
 }
 
 void InstallSeamlessCoopPatches() {

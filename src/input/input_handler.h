@@ -67,6 +67,8 @@
 #define HOTKEY_SCREENSHOT_WITH_OVERLAYS 0xf000000e
 #define HOTKEY_OPEN_EMULATOR_SETTINGS 0xf000000f
 #define HOTKEY_TOGGLE_FRIENDS 0xf0000010
+#define HOTKEY_BB_BECKONING_BELL 0xf0000012
+#define HOTKEY_BB_RESONANT_BELL 0xf0000013
 
 #define SDL_UNMAPPED UINT32_MAX - 1
 
@@ -175,6 +177,8 @@ const std::map<std::string, u32> string_to_hotkey_map = {
     {"hotkey_volume_down", HOTKEY_VOLUME_DOWN},
     {"hotkey_emulator_settings", HOTKEY_OPEN_EMULATOR_SETTINGS},
     {"hotkey_toggle_friends", HOTKEY_TOGGLE_FRIENDS},
+    {"hotkey_bb_beckoning_bell", HOTKEY_BB_BECKONING_BELL},
+    {"hotkey_bb_resonant_bell", HOTKEY_BB_RESONANT_BELL},
 };
 
 const std::map<std::string, AxisMapping> string_to_axis_map = {
@@ -540,7 +544,7 @@ public:
 
 class ControllerAllOutputs {
 public:
-    static constexpr u64 output_count = 43;
+    static constexpr u64 output_count = 45;
     std::array<ControllerOutput, output_count> data = {
         // Important: these have to be the first, or else they will update in the wrong order
         ControllerOutput(LEFTJOYSTICK_HALFMODE),
@@ -595,6 +599,8 @@ public:
         ControllerOutput(HOTKEY_VOLUME_DOWN),
         ControllerOutput(HOTKEY_OPEN_EMULATOR_SETTINGS),
         ControllerOutput(HOTKEY_TOGGLE_FRIENDS),
+        ControllerOutput(HOTKEY_BB_BECKONING_BELL),
+        ControllerOutput(HOTKEY_BB_RESONANT_BELL),
 
         ControllerOutput(SDL_GAMEPAD_BUTTON_INVALID, SDL_GAMEPAD_AXIS_INVALID),
     };
