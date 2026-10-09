@@ -34,6 +34,10 @@ static std::vector<ImGui::Layer*> layers;
 static std::deque<std::pair<bool, ImGui::Layer*>> change_layers{};
 static std::mutex change_layers_mutex{};
 
+// SDL events arrive on the main thread while the frame is built on the present thread; both
+// touch the ImGui input queue.
+static std::mutex input_events_mutex{};
+
 static ImGuiID dock_id;
 static std::atomic<std::uint32_t> force_gamepad_input_capture_count{0};
 
@@ -172,7 +176,10 @@ void Shutdown(const vk::Device& device) {
 }
 
 bool ProcessEvent(SDL_Event* event) {
-    Sdl::ProcessEvent(event);
+    {
+        std::scoped_lock lock{input_events_mutex};
+        Sdl::ProcessEvent(event);
+    }
     switch (event->type) {
     // Don't block release/up events
     case SDL_EVENT_MOUSE_MOTION:
@@ -229,8 +236,11 @@ ImGuiID NewFrame(bool is_reusing_frame) {
         }
     }
 
-    Sdl::NewFrame(is_reusing_frame);
-    ImGui::NewFrame();
+    {
+        std::scoped_lock lock{input_events_mutex};
+        Sdl::NewFrame(is_reusing_frame);
+        ImGui::NewFrame();
+    }
 
     ImGuiWindowFlags flags =
         ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_AutoHideTabBar;
