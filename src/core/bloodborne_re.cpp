@@ -3774,15 +3774,17 @@ void RequestBellUse(std::int32_t goods_id) {
     }
 }
 
-void RequestSessionStop() {
+void RequestSessionStop(bool keep_role) {
     if (!deferred_summon_reload_hook_installed) {
         LOG_INFO(Debug, "Bloodborne session stop hotkey ignored: seamless co-op is off");
         return;
     }
-    LOG_INFO(Debug, "Bloodborne session stop hotkey requested");
+    LOG_INFO(Debug, "Bloodborne session stop hotkey requested (keep role: {})", keep_role);
     requested_session_stop.store(true);
     requested_death_release.store(true); // also gives up a held death
-    auto_bell_goods.store(0);
+    if (!keep_role) {
+        auto_bell_goods.store(0);
+    }
 }
 
 void InstallSeamlessCoopPatches() {

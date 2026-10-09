@@ -20,7 +20,8 @@ void InstallSeamlessCoopPatches();
 void RequestBellUse(std::int32_t goods_id);
 // Asks the game to end the current multiplayer session (host: sends the guest home; guest:
 // leaves). Safe to call from any thread.
-void RequestSessionStop();
+// keep_role: keep ringing the remembered bell afterwards so the party forms again (regroup).
+void RequestSessionStop(bool keep_role = false);
 void InstallReverseEngineeringTrace();
 
 } // namespace Core::Bloodborne

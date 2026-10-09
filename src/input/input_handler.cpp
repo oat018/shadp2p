@@ -187,6 +187,7 @@ std::filesystem::path GetInputConfigFile(const std::string& game_id) {
             {"hotkey_bb_beckoning_bell", "pgup"},
             {"hotkey_bb_resonant_bell", "pgdown"},
             {"hotkey_bb_end_session", "home"},
+            {"hotkey_bb_regroup", "insert"},
         };
         std::string legacy_capture_binding;
         bool legacy_capture_binding_found = false;
@@ -826,6 +827,11 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
         case HOTKEY_BB_END_SESSION:
             if (new_button_state) {
                 Core::Bloodborne::RequestSessionStop();
+            }
+            break;
+        case HOTKEY_BB_REGROUP:
+            if (new_button_state) {
+                Core::Bloodborne::RequestSessionStop(true);
             }
             break;
         case KEY_TOGGLE:
