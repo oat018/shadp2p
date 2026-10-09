@@ -18,6 +18,9 @@ void InstallSeamlessCoopPatches();
 // Asks the game to use a multiplayer bell (goods ID) as if the player had rung it. Safe to call
 // from any thread; the use is dispatched on the game thread.
 void RequestBellUse(std::int32_t goods_id);
+// Asks the game to end the current multiplayer session (host: sends the guest home; guest:
+// leaves). Safe to call from any thread.
+void RequestSessionStop();
 void InstallReverseEngineeringTrace();
 
 } // namespace Core::Bloodborne

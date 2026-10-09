@@ -785,6 +785,7 @@ std::optional<SummonPlacementDescriptor> seamless_host_placement;
 std::optional<SummonPlacementDescriptor> seamless_received_host_placement;
 bool seamless_received_host_placement_consumed{};
 std::atomic<s32> requested_bell_goods{};
+std::atomic<bool> requested_session_stop{};
 std::atomic<u32> pending_summon_reload_map{};
 std::atomic<u32> pending_summon_reload_state_map{};
 
@@ -1606,6 +1607,26 @@ void ResumePreMatchCrossMapResponder() {
              "Bloodborne seamless responder native bell dispatch map={:#x} area={} attempt={} "
              "result={}",
              record.target_map, record.target_area, record.attempts, record.native_result);
+}
+
+void ApplyRequestedSessionStop() {
+    if (!requested_session_stop.exchange(false)) {
+        return;
+    }
+
+    const u64 multi_play = GetMatchingState();
+    if (multi_play < 0x10000 || !HasMemoryAccess(multi_play, 0x128, MemoryProt::CpuRead)) {
+        LOG_INFO(Debug, "Bloodborne session stop hotkey ignored: no multiplayer manager");
+        return;
+    }
+
+    // CSMultiPlayMan::Stop: the game's own orderly teardown; it refuses from the idle state.
+    using MultiPlayStop = bool PS4_SYSV_ABI (*)(u64 multi_play);
+    const s32 state = ReadValue<s32>(multi_play, 0x124);
+    const auto stop = reinterpret_cast<MultiPlayStop>(image_base + MultiPlayStopRequestOffset);
+    const bool result = stop(multi_play);
+    LOG_INFO(Debug, "Bloodborne session stop hotkey: multiplayer state {} result={}", state,
+             result);
 }
 
 void ApplyRequestedBellUse() {
@@ -2848,6 +2869,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         ApplyDeferredSummonReload();
         ResumePreMatchCrossMapResponder();
         ApplyRequestedBellUse();
+        ApplyRequestedSessionStop();
     }
     if (healing_fountain_host_availability_hook_installed &&
         site.offset == HealingFountainAvailabilityOffset) {
@@ -3545,6 +3567,15 @@ void RequestBellUse(std::int32_t goods_id) {
         LOG_INFO(Debug, "Bloodborne bell hotkey requested goods {}", goods_id);
         requested_bell_goods.store(goods_id);
     }
+}
+
+void RequestSessionStop() {
+    if (!deferred_summon_reload_hook_installed) {
+        LOG_INFO(Debug, "Bloodborne session stop hotkey ignored: seamless co-op is off");
+        return;
+    }
+    LOG_INFO(Debug, "Bloodborne session stop hotkey requested");
+    requested_session_stop.store(true);
 }
 
 void InstallSeamlessCoopPatches() {
