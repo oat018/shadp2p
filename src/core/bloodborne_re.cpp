@@ -3557,6 +3557,52 @@ void TraceMatching2LeaveRoom(std::uintptr_t return_address, std::uint64_t room_i
              room_id, return_address, caller_offset, reload_phase, current_map, requested_map);
 }
 
+// Experimental: keep a co-op guest in the host's world when the session script would send them
+// home. Guest-side changes to the native SprjSessionManager handlers, on with
+// SHADPS4_BLOODBORNE_STAY_IN_SESSION=1:
+//  - host died: the "HostDead_1" timer (forced warp home) is not scheduled
+//  - area boss defeated: the "BlockClear2_3Leave" timer (CSMultiPlayMan::Stop) is not scheduled
+//    and "BlockClear2_3" no longer takes its white-phantom branch (forced warp home)
+static void InstallStayInSessionPatches(u64 base) {
+    if (!EnvFlagEnabled("SHADPS4_BLOODBORNE_STAY_IN_SESSION")) {
+        return;
+    }
+
+    struct BytePatch {
+        u64 offset;
+        std::span<const u8> expected;
+        std::span<const u8> replacement;
+    };
+    static constexpr std::array<u8, 5> HostDeadSchedule{0xE8, 0xA5, 0x97, 0xFA, 0xFF};
+    static constexpr std::array<u8, 5> BlockClearLeaveSchedule{0xE8, 0x44, 0x59, 0xFA, 0xFF};
+    static constexpr std::array<u8, 5> NoCall{0x0F, 0x1F, 0x44, 0x00, 0x00};
+    static constexpr std::array<u8, 2> BlockClearPhantomBranch{0x75, 0x46};
+    static constexpr std::array<u8, 2> BlockClearSkipPhantomBranch{0xEB, 0x46};
+    const std::array<BytePatch, 3> patches{{
+        {0x01381A16, HostDeadSchedule, NoCall},
+        {0x01385877, BlockClearLeaveSchedule, NoCall},
+        {0x0138599C, BlockClearPhantomBranch, BlockClearSkipPhantomBranch},
+    }};
+
+    const u64 image_size = MemoryPatcher::g_eboot_image_size;
+    for (const auto& patch : patches) {
+        if (patch.offset > image_size || patch.expected.size() > image_size - patch.offset ||
+            !std::ranges::equal(
+                std::span<const u8>{reinterpret_cast<const u8*>(base + patch.offset),
+                                    patch.expected.size()},
+                patch.expected)) {
+            LOG_ERROR(Debug, "Bloodborne stay-in-session patch skipped: unexpected bytes at {:#x}",
+                      patch.offset);
+            return;
+        }
+    }
+    for (const auto& patch : patches) {
+        std::memcpy(reinterpret_cast<u8*>(base + patch.offset), patch.replacement.data(),
+                    patch.replacement.size());
+    }
+    LOG_INFO(Debug, "Bloodborne stay-in-session patches enabled (host death, boss defeated)");
+}
+
 void RequestBellUse(std::int32_t goods_id) {
     if (!deferred_summon_reload_hook_installed) {
         LOG_INFO(Debug, "Bloodborne bell hotkey ignored for goods {}: seamless co-op is off",
@@ -4015,6 +4061,7 @@ void InstallSeamlessCoopPatches() {
     summon_build_world_state_patch_installed = true;
     summon_build_negative_event_patch_installed = true;
     stage_transition_keep_matching_patch_installed = true;
+    InstallStayInSessionPatches(base);
     LOG_INFO(Debug,
              "Bloodborne seamless patches enabled Beckoning, Small Resonant, and Sinister Bell "
              "use, active search, cross-map candidate selection, and native summon construction "
