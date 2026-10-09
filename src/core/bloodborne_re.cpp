@@ -1729,11 +1729,12 @@ void ApplySharedDeathRule() {
 // Co-op role kept from the last bell hotkey, so a session that ends (death, load, network) is
 // formed again without pressing anything: while no other player is in the world, the host keeps
 // the Beckoning Bell rung and a guest keeps the Small Resonant Bell rung. Cleared by the
-// end-session hotkey. Only active with SHADPS4_BLOODBORNE_SHARED_DEATH=1.
+// end-session hotkey. On with SHADPS4_BLOODBORNE_AUTO_REJOIN=1 (or the shared-death experiment).
 std::atomic<s32> auto_bell_goods{};
 
 void ApplyAutoRejoin() {
-    static const bool enabled = EnvFlagEnabled("SHADPS4_BLOODBORNE_SHARED_DEATH");
+    static const bool enabled = EnvFlagEnabled("SHADPS4_BLOODBORNE_AUTO_REJOIN") ||
+                                EnvFlagEnabled("SHADPS4_BLOODBORNE_SHARED_DEATH");
     const s32 goods_id = auto_bell_goods.load();
     if (!enabled || goods_id == 0) {
         return;
