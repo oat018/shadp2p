@@ -1609,6 +1609,142 @@ void ResumePreMatchCrossMapResponder() {
              record.target_map, record.target_area, record.attempts, record.native_result);
 }
 
+// Experimental shared-death rule, on with SHADPS4_BLOODBORNE_SHARED_DEATH=1 ("test" also treats
+// solo play as a session with a healthy partner and drops the player to 1 HP once, to exercise
+// the revive without a second player).
+//
+// While another player character is in the world, the local player's data module carries the
+// game's own per-character "no dead" flag, so HP stops at 1. Reaching 1 HP means "downed": HP is
+// held at 1 until the revive delay passes, then restored to the maximum. When every partner is
+// at 1 HP or less at the same time, the flag is cleared and HP is set to 0 for a real death.
+// Each client runs this for its own character only.
+constexpr u64 ChrModulesOffset = 0x3B0;
+constexpr u64 ChrDataModuleOffset = 0x20;
+constexpr u64 DataModuleHpOffset = 0xF8;
+constexpr u64 DataModuleMaxHpOffset = 0xFC;
+constexpr u64 DataModuleFlagsOffset = 0x200;
+constexpr u16 DataModuleNoDeadFlag = 0x4;
+constexpr u64 WorldChrManCountOffset = 0x30;
+constexpr u64 WorldChrManEntriesOffset = 0x38;
+constexpr u64 WorldChrManEntrySize = 0x38;
+constexpr auto DownedReviveDelay = std::chrono::seconds{15};
+
+u64 GetChrDataModule(u64 chr) {
+    const u64 modules = chr >= 0x10000 ? ReadValue<u64>(chr, ChrModulesOffset) : 0;
+    const u64 data = modules >= 0x10000 ? ReadValue<u64>(modules, ChrDataModuleOffset) : 0;
+    return data >= 0x10000 && HasMemoryAccess(data, DataModuleFlagsOffset + sizeof(u16),
+                                              MemoryProt::CpuWrite)
+               ? data
+               : 0;
+}
+
+void ApplySharedDeathRule() {
+    static const int mode = [] {
+        const char* value = std::getenv("SHADPS4_BLOODBORNE_SHARED_DEATH");
+        if (value == nullptr || *value == 0 || std::string_view{value} == "0") {
+            return 0;
+        }
+        return std::string_view{value} == "test" ? 2 : 1;
+    }();
+    if (mode == 0) {
+        return;
+    }
+
+    static bool flag_owned = false;
+    static bool downed = false;
+    static bool test_drop_done = false;
+    static bool logged_ready = false;
+    static std::chrono::steady_clock::time_point downed_since{};
+
+    const u64 world_chr_man =
+        image_base != 0 ? ReadValue<u64>(image_base + CandidateLocalStatePointerOffset, 0) : 0;
+    const u64 player = world_chr_man >= 0x10000 ? ReadValue<u64>(world_chr_man, 0x60) : 0;
+    const u64 data = GetChrDataModule(player);
+    if (data == 0) {
+        flag_owned = false;
+        downed = false;
+        return;
+    }
+
+    // Other player characters currently in the world, and whether any of them is still up.
+    int partners = 0;
+    bool partner_up = false;
+    const s32 count = ReadValue<s32>(world_chr_man, WorldChrManCountOffset);
+    const u64 entries = ReadValue<u64>(world_chr_man, WorldChrManEntriesOffset);
+    for (s32 index = 0; entries >= 0x10000 && index < std::min(count, 8); ++index) {
+        const u64 chr = ReadValue<u64>(entries, index * WorldChrManEntrySize);
+        const u64 chr_data = chr != player ? GetChrDataModule(chr) : 0;
+        if (chr_data == 0) {
+            continue;
+        }
+        ++partners;
+        partner_up = partner_up || ReadValue<s32>(chr_data, DataModuleHpOffset) > 1;
+    }
+    if (mode == 2 && partners == 0) {
+        partners = 1;
+        partner_up = true;
+    }
+
+    const u16 flags = ReadValue<u16>(data, DataModuleFlagsOffset);
+    const s32 hp = ReadValue<s32>(data, DataModuleHpOffset);
+    const s32 max_hp = ReadValue<s32>(data, DataModuleMaxHpOffset);
+    if (!logged_ready) {
+        logged_ready = true;
+        LOG_INFO(Debug, "Bloodborne shared death ready: hp={}/{} flags={:#x} partners={}", hp,
+                 max_hp, flags, partners);
+    }
+
+    if (partners == 0) {
+        if (flag_owned) {
+            WriteValue(data, DataModuleFlagsOffset, static_cast<u16>(flags & ~DataModuleNoDeadFlag));
+            flag_owned = false;
+            LOG_INFO(Debug, "Bloodborne shared death: no partner, normal death rules");
+        }
+        downed = false;
+        return;
+    }
+
+    if (!downed) {
+        if ((flags & DataModuleNoDeadFlag) == 0) {
+            WriteValue(data, DataModuleFlagsOffset, static_cast<u16>(flags | DataModuleNoDeadFlag));
+            if (!flag_owned) {
+                LOG_INFO(Debug, "Bloodborne shared death: partner present, death protection on");
+            }
+            flag_owned = true;
+        }
+        if (mode == 2 && !test_drop_done && hp > 1) {
+            test_drop_done = true;
+            WriteValue(data, DataModuleHpOffset, s32{1});
+            LOG_INFO(Debug, "Bloodborne shared death test: dropped HP from {} to 1", hp);
+            return;
+        }
+        if (hp <= 1 && max_hp > 1) {
+            downed = true;
+            downed_since = std::chrono::steady_clock::now();
+            LOG_INFO(Debug, "Bloodborne shared death: downed (partner up={})", partner_up);
+        }
+        return;
+    }
+
+    if (!partner_up) {
+        WriteValue(data, DataModuleFlagsOffset, static_cast<u16>(flags & ~DataModuleNoDeadFlag));
+        WriteValue(data, DataModuleHpOffset, s32{0});
+        flag_owned = false;
+        downed = false;
+        LOG_INFO(Debug, "Bloodborne shared death: every player is down, real death");
+        return;
+    }
+    if (std::chrono::steady_clock::now() - downed_since >= DownedReviveDelay) {
+        WriteValue(data, DataModuleHpOffset, max_hp);
+        downed = false;
+        LOG_INFO(Debug, "Bloodborne shared death: revived with {} HP", max_hp);
+        return;
+    }
+    if (hp != 1) {
+        WriteValue(data, DataModuleHpOffset, s32{1}); // no healing while downed
+    }
+}
+
 void ApplyRequestedSessionStop() {
     if (!requested_session_stop.exchange(false)) {
         return;
@@ -2870,6 +3006,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         ResumePreMatchCrossMapResponder();
         ApplyRequestedBellUse();
         ApplyRequestedSessionStop();
+        ApplySharedDeathRule();
     }
     if (healing_fountain_host_availability_hook_installed &&
         site.offset == HealingFountainAvailabilityOffset) {
