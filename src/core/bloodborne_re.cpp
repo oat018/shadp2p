@@ -1828,7 +1828,23 @@ void ApplyHealingFountainHostAvailability(const GuestRegisterSnapshot& registers
 
     record.player = GetLocalPlayer();
     record.host_effect = HasPlayerEffect(record.player, 9001);
-    if (!record.host_effect) {
+    static const bool every_player = EnvFlagEnabled("SHADPS4_BLOODBORNE_LANTERN_ALL");
+    if (every_player) {
+        // Experiment: log what the lantern action object looks like while a session blocks it.
+        static std::chrono::steady_clock::time_point last_log{};
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_log >= std::chrono::seconds{3}) {
+            last_log = now;
+            LOG_INFO(Debug,
+                     "Bloodborne lantern: entity={} gates 48={} 49={} 4a={} 4b={} host_effect={} "
+                     "message={}",
+                     ReadValue<s32>(record.object, 0x20), ReadValue<u8>(record.object, 0x48),
+                     ReadValue<u8>(record.object, 0x49), ReadValue<u8>(record.object, 0x4A),
+                     ReadValue<u8>(record.object, 0x4B), record.host_effect,
+                     ReadValue<s32>(record.object, 0x2C));
+        }
+    }
+    if (!record.host_effect && !every_player) {
         record.result = "not_multiplayer_host";
         return;
     }
